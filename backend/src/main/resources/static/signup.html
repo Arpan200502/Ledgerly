@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign up — Ledgerly</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="index.html">Ledger<span>ly</span></a>
+    <div class="nav-links">
+      <div id="nav-guest" class="nav-links" style="display:flex; gap:10px;">
+        <a href="login.html">Login</a>
+        <a class="btn btn-primary btn-sm" href="signup.html">Sign up</a>
+      </div>
+      <div id="nav-authed" class="nav-user" style="display:none;">
+        <a href="chat.html">Chat</a>
+        <a href="profile.html">Profile</a>
+        <div class="nav-user">
+          <span id="nav-user-name" class="name">User</span>
+          <div id="nav-avatar" class="avatar">U</div>
+        </div>
+        <a href="#" id="btn-logout" class="btn btn-ghost btn-sm">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div class="card auth-card">
+      <h1 class="page-title">Create account</h1>
+      <p class="page-sub">Join Ledgerly — free to start</p>
+
+      <div id="error-box" class="form-error" style="display:none;"></div>
+
+      <form id="signup-form">
+        <div class="form-group">
+          <label for="name">Full name</label>
+          <input type="text" id="name" name="name" placeholder="Ravi Sharma" required autocomplete="name" />
+        </div>
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" placeholder="you@example.com" required autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="phone">Phone <span style="color:var(--muted); font-weight:400;">(optional)</span></label>
+          <input type="tel" id="phone" name="phone" placeholder="+91 9876543210" autocomplete="tel" />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" placeholder="Min 6 characters" required minlength="6" autocomplete="new-password" />
+          <div class="form-hint">At least 6 characters.</div>
+        </div>
+        <div class="form-group">
+          <label for="confirm">Confirm password</label>
+          <input type="password" id="confirm" name="confirm" placeholder="Repeat password" required autocomplete="new-password" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="submit-btn">Create account</button>
+      </form>
+
+      <div class="form-footer">
+        Already have an account? <a href="login.html">Login</a>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      if (isLoggedIn()) {
+        window.location.href = "chat.html";
+        return;
+      }
+
+      const form = document.getElementById("signup-form");
+      const errorBox = document.getElementById("error-box");
+      const submitBtn = document.getElementById("submit-btn");
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        hideMessage(errorBox);
+
+        const password = document.getElementById("password").value;
+        const confirm = document.getElementById("confirm").value;
+
+        if (password !== confirm) {
+          showError(errorBox, "Passwords do not match.");
+          return;
+        }
+        if (password.length < 6) {
+          showError(errorBox, "Password must be at least 6 characters.");
+          return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating account…";
+
+        try {
+          const result = await api("/auth/signup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: document.getElementById("name").value,
+              email: document.getElementById("email").value,
+              phone: document.getElementById("phone").value,
+              password: password,
+            }),
+          });
+
+          if (result.ok && result.data && result.data.token) {
+            setSession(result.data.token, result.data.user);
+            window.location.href = "chat.html";
+            return;
+          }
+
+          showError(
+            errorBox,
+            (result.data && result.data.error) || "Signup failed. Try again."
+          );
+        } catch (err) {
+          showError(errorBox, "Network error — is the backend running on port 8081?");
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Create account";
+        }
+      });
+    });
+  </script>
+</body>
+</html>

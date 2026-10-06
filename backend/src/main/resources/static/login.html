@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login — Ledgerly</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="index.html">Ledger<span>ly</span></a>
+    <div class="nav-links">
+      <div id="nav-guest" class="nav-links" style="display:flex; gap:10px;">
+        <a href="login.html">Login</a>
+        <a class="btn btn-primary btn-sm" href="signup.html">Sign up</a>
+      </div>
+      <div id="nav-authed" class="nav-user" style="display:none;">
+        <a href="chat.html">Chat</a>
+        <a href="profile.html">Profile</a>
+        <div class="nav-user">
+          <span id="nav-user-name" class="name">User</span>
+          <div id="nav-avatar" class="avatar">U</div>
+        </div>
+        <a href="#" id="btn-logout" class="btn btn-ghost btn-sm">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div class="card auth-card">
+      <h1 class="page-title">Welcome back</h1>
+      <p class="page-sub">Login to Ledgerly</p>
+
+      <div id="error-box" class="form-error" style="display:none;"></div>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" placeholder="you@example.com" required autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" placeholder="••••••••" required autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="submit-btn">Login</button>
+      </form>
+
+      <div class="form-footer">
+        New to Ledgerly? <a href="signup.html">Create an account</a>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      if (isLoggedIn()) {
+        window.location.href = "chat.html";
+        return;
+      }
+
+      const form = document.getElementById("login-form");
+      const errorBox = document.getElementById("error-box");
+      const submitBtn = document.getElementById("submit-btn");
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        hideMessage(errorBox);
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Logging in…";
+
+        try {
+          const result = await api("/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: document.getElementById("email").value,
+              password: document.getElementById("password").value,
+            }),
+          });
+
+          if (result.ok && result.data && result.data.token) {
+            setSession(result.data.token, result.data.user);
+            window.location.href = "chat.html";
+            return;
+          }
+
+          const msg =
+            (result.data && result.data.error) ||
+            "Login failed. Check your email and password.";
+          showError(errorBox, msg);
+        } catch (err) {
+          showError(errorBox, "Network error — is the backend running on port 8081?");
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Login";
+        }
+      });
+    });
+  </script>
+</body>
+</html>

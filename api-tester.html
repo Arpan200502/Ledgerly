@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ledgerly API Tester</title>
+  <style>
+    body { font-family: Consolas, monospace; background: #1a1a2e; color: #eaeaea; padding: 24px; max-width: 860px; margin: auto; }
+    h1 { color: #00d4ff; }
+    h2 { color: #ffd166; margin-top: 28px; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    button { background: #0f3460; color: #fff; border: 1px solid #00d4ff; padding: 8px 14px; margin: 4px; cursor: pointer; border-radius: 4px; font-family: inherit; }
+    button:hover { background: #1a5276; }
+    button.danger { border-color: #e63946; background: #6a040f; }
+    button.danger:hover { background: #9d0208; }
+    input, textarea { background: #16213e; color: #fff; border: 1px solid #444; padding: 8px; width: 100%; box-sizing: border-box; font-family: inherit; margin: 4px 0 12px; border-radius: 4px; }
+    label { color: #aaa; font-size: 13px; }
+    #out { background: #0d1b2a; border: 1px solid #333; padding: 14px; white-space: pre-wrap; word-break: break-all; min-height: 120px; border-radius: 4px; margin-top: 8px; }
+    .ok { color: #80ed99; }
+    .err { color: #ff6b6b; }
+    .info { color: #00d4ff; }
+  </style>
+</head>
+<body>
+  <h1>Ledgerly API Tester</h1>
+  <p>Base URL: <span class="info">http://localhost:8081</span> — talks to your running Spring Boot app.</p>
+
+  <h2>1. Create customer (POST /customers)</h2>
+  <label>Name</label>
+  <input id="name" value="Sharma Ji" />
+  <label>Email</label>
+  <input id="email" value="sharma@gmail.com" />
+  <label>Phone</label>
+  <input id="phone" value="+91 9999911111" />
+  <button onclick="createCustomer()">POST create</button>
+
+  <h2>2. List all (GET /customers)</h2>
+  <button onclick="listCustomers()">GET list</button>
+
+  <h2>3. Get one by ID (GET /customers/{id})</h2>
+  <label>ID</label>
+  <input id="getid" value="1" style="width:120px" />
+  <button onclick="getCustomer()">GET one</button>
+
+  <h2>4. Update by ID (PUT /customers/{id})</h2>
+  <label>New name</label>
+  <input id="upname" value="Sharma Ji (updated)" />
+  <label>Email</label>
+  <input id="upemail" value="sharma@gmail.com" />
+  <label>Phone</label>
+  <input id="upphone" value="+91 9999911111" />
+  <label>ID to update</label>
+  <input id="upid" value="1" style="width:120px" />
+  <button onclick="updateCustomer()">PUT update</button>
+
+  <h2>5. Delete by ID (DELETE /customers/{id})</h2>
+  <label>ID to delete</label>
+  <input id="delid" value="1" style="width:120px" />
+  <button class="danger" onclick="deleteCustomer()">DELETE</button>
+
+  <h2>Response</h2>
+  <div id="out">(no requests yet)</div>
+
+  <script>
+    const BASE = "http://localhost:8081";
+    const out = document.getElementById("out");
+
+    function show(label, status, body) {
+      const cls = status >= 200 && status < 300 ? "ok" : "err";
+      out.innerHTML =
+        `<span class="info">${label}</span>\n` +
+        `<span class="${cls}">HTTP ${status}</span>\n\n` +
+        JSON.stringify(body, null, 2);
+    }
+
+    async function createCustomer() {
+      const body = {
+        name: document.getElementById("name").value,
+        email: document.getElementById("email").value,
+        phone: document.getElementById("phone").value,
+      };
+      const res = await fetch(BASE + "/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      show("POST /customers", res.status, await res.json());
+    }
+
+    async function listCustomers() {
+      const res = await fetch(BASE + "/customers");
+      show("GET /customers", res.status, await res.json());
+    }
+
+    async function getCustomer() {
+      const id = document.getElementById("getid").value;
+      const res = await fetch(`${BASE}/customers/${id}`);
+      let data;
+      try { data = await res.json(); } catch { data = "(empty body)"; }
+      show(`GET /customers/${id}`, res.status, data);
+    }
+
+    async function updateCustomer() {
+      const id = document.getElementById("upid").value;
+      const body = {
+        name: document.getElementById("upname").value,
+        email: document.getElementById("upemail").value,
+        phone: document.getElementById("upphone").value,
+      };
+      const res = await fetch(`${BASE}/customers/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      let data;
+      try { data = await res.json(); } catch { data = "(empty body)"; }
+      show(`PUT /customers/${id}`, res.status, data);
+    }
+
+    async function deleteCustomer() {
+      const id = document.getElementById("delid").value;
+      const res = await fetch(`${BASE}/customers/${id}`, { method: "DELETE" });
+      show(`DELETE /customers/${id}`, res.status, "(deleted — 204 means success)");
+    }
+  </script>
+</body>
+</html>

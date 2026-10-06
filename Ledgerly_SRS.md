@@ -190,11 +190,20 @@ Voice input -> Sarvam STT -> raw text
 7. **Rejection handling**: any failed check returns a structured reason to the SQL-generation step for an informed retry, capped at 3 attempts total.
 
 ### 7.2 Write Lane (Structured Actions, Not Generated SQL)
-- LLM output for WRITE intent is a JSON object matching one of a small fixed set of action schemas, e.g.:
+- LLM output for WRITE intent is a JSON object matching one of a small fixed set of action schemas; it must never be free-form SQL. For a sale with a partial payment:
 ```json
-{ "action": "add_transaction", "customer_name": "Sharma", "amount": 500, "type": "credit_given" }
+{
+  "action": "record_sale",
+  "customerName": "Sharma",
+  "productName": "iPhone 18",
+  "quantity": 1,
+  "totalAmount": 120000,
+  "amountPaid": 100000,
+  "paymentMethod": "UNKNOWN",
+  "interpretationNote": "Assumed total ₹120000, ₹100000 paid now, ₹20000 outstanding"
+}
 ```
-- Each action name maps to exactly one hand-written, parameterized query/service method — the LLM never generates SQL for writes.
+- Each action name maps to exactly one hand-written, parameterized, `@Transactional` service method — the LLM never generates SQL for writes.
 - Before execution, the system speaks back the intended action for confirmation.
 - On confirmation, the write executes inside a single `@Transactional` service method that (a) inserts the ledger row and (b) updates the customer's running balance (and stock, if applicable) together.
 - Business rules (amount must be positive, customer must exist or trigger explicit "new customer" confirmation, stock must not go negative) are enforced in this service method in ordinary Java code — not left to the LLM.

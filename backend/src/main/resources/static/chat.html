@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat — Ledgerly</title>
+  <link rel="stylesheet" href="css/styles.css?v=dark-20261006" />
+</head>
+<body class="chat-dark">
+  <nav class="navbar">
+    <a class="brand" href="index.html">Ledger<span>ly</span></a>
+    <div class="nav-links">
+      <div id="nav-guest" class="nav-links" style="display:flex; gap:10px;">
+        <a href="login.html">Login</a>
+        <a class="btn btn-primary btn-sm" href="signup.html">Sign up</a>
+      </div>
+      <div id="nav-authed" class="nav-user" style="display:none;">
+        <a href="chat.html" style="color:var(--primary); font-weight:700;">Chat</a>
+        <a href="profile.html">Profile</a>
+        <div class="nav-user">
+          <span id="nav-user-name" class="name">User</span>
+          <div id="nav-avatar" class="avatar">U</div>
+        </div>
+        <a href="#" id="btn-logout" class="btn btn-ghost btn-sm">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="chat-page">
+    <div class="chat-header">
+      <h2>💬 Ledgerly Chat</h2>
+      <span class="status">● Online</span>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-placeholder" id="chat-placeholder">
+        <div class="big">🎙️</div>
+        <h3>Your voice ledger copilot</h3>
+        <p>
+          Ask Ledgerly about your business in English, Hindi, or Hinglish.
+        </p>
+      </div>
+    </div>
+
+    <form class="chat-input-bar" id="chat-form">
+      <input
+        type="text"
+        id="chat-input"
+        placeholder="Ask something… e.g. Sharma ji ka kitna udhaar hai?"
+        autocomplete="off"
+        autofocus
+      />
+      <button type="button" class="btn btn-voice" id="voice-btn" aria-label="Start voice mode">
+        🎙️ Voice
+      </button>
+      <label class="voice-output-toggle" title="Read Ledgerly replies aloud">
+        <input type="checkbox" id="voice-output-toggle" />
+        <span>🔊 Read replies</span>
+      </label>
+      <button type="submit" class="btn btn-primary" id="send-btn">Send</button>
+    </form>
+  </div>
+
+  <script src="js/app.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      if (!requireAuth()) return;
+
+      const user = getUser();
+      const messagesEl = document.getElementById("chat-messages");
+      const placeholder = document.getElementById("chat-placeholder");
+      const form = document.getElementById("chat-form");
+      const input = document.getElementById("chat-input");
+      const sendBtn = document.getElementById("send-btn");
+      const voiceBtn = document.getElementById("voice-btn");
+      const voiceOutputToggle = document.getElementById("voice-output-toggle");
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const voiceMode = Boolean(SpeechRecognition);
+      let voiceOutputEnabled = false;
+      let recognition = null;
+      let isListening = false;
+
+      voiceOutputToggle.addEventListener("change", () => {
+        voiceOutputEnabled = voiceOutputToggle.checked;
+      });
+
+      if (!voiceMode) {
+        voiceBtn.disabled = true;
+        voiceBtn.title = "Voice mode is not supported by this browser";
+      } else {
+        recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = "en-IN";
+
+        recognition.onstart = () => {
+          isListening = true;
+          voiceBtn.classList.add("is-listening");
+          voiceBtn.textContent = "⏹ Stop";
+          voiceBtn.setAttribute("aria-label", "Stop listening");
+        };
+
+        recognition.onresult = (event) => {
+          let transcript = "";
+          for (let index = event.resultIndex; index < event.results.length; index++) {
+            transcript += event.results[index][0].transcript;
+          }
+
+          input.value = transcript.trim();
+        };
+
+        recognition.onerror = (event) => {
+          if (event.error !== "aborted") {
+            addMessage("Voice input failed: " + event.error, "bot");
+          }
+        };
+
+        recognition.onend = () => {
+          isListening = false;
+          voiceBtn.classList.remove("is-listening");
+          voiceBtn.textContent = "🎙️ Voice";
+          voiceBtn.setAttribute("aria-label", "Start voice mode");
+          input.focus();
+        };
+
+        voiceBtn.addEventListener("click", () => {
+          if (isListening) {
+            recognition.stop();
+          } else {
+            recognition.start();
+          }
+        });
+      }
+
+      async function speakReply(text) {
+        if (!voiceMode || !voiceOutputEnabled || !text) return;
+        const response = await api("/ai/speak", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ text }),
+        });
+        if (!response.ok || !response.data || !response.data.audio) {
+          throw new Error(response.data && response.data.error
+            ? response.data.error
+            : "Unable to generate voice response");
+        }
+        const audio = new Audio(
+          "data:" + response.data.contentType + ";base64," + response.data.audio
+        );
+        await audio.play();
+      }
+
+      function addMessage(text, who) {
+        if (placeholder) placeholder.remove();
+
+        const wrap = document.createElement("div");
+        wrap.className = "msg " + who;
+
+        const body = document.createElement("div");
+        body.textContent = text;
+
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent =
+          (who === "user" ? (user && user.name ? user.name : "You") : "Ledgerly") +
+          " · " +
+          new Date().toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+
+        wrap.appendChild(body);
+        wrap.appendChild(meta);
+        messagesEl.appendChild(wrap);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      function addQueryResult(data) {
+        if (!data || !data.sql || !Array.isArray(data.rows)) return;
+
+        const panel = document.createElement("div");
+        panel.className = "msg bot";
+
+        const summary = document.createElement("div");
+        summary.textContent = `${data.rowCount || data.rows.length} result(s) found`;
+        panel.appendChild(summary);
+
+        const sql = document.createElement("code");
+        sql.style.display = "block";
+        sql.style.marginTop = "10px";
+        sql.style.whiteSpace = "pre-wrap";
+        sql.textContent = data.sql;
+        panel.appendChild(sql);
+
+        if (data.rows.length) {
+          const table = document.createElement("table");
+          table.style.marginTop = "12px";
+          table.style.borderCollapse = "collapse";
+          table.style.width = "100%";
+          const columns = Object.keys(data.rows[0]);
+          const header = table.insertRow();
+          columns.forEach((column) => {
+            const cell = header.insertCell();
+            cell.textContent = column;
+            cell.style.fontWeight = "700";
+            cell.style.padding = "6px";
+            cell.style.textAlign = "left";
+          });
+          data.rows.forEach((row) => {
+            const line = table.insertRow();
+            columns.forEach((column) => {
+              const cell = line.insertCell();
+              cell.textContent = row[column] == null ? "" : String(row[column]);
+              cell.style.padding = "6px";
+              cell.style.borderTop = "1px solid #e5e7eb";
+            });
+          });
+          panel.appendChild(table);
+        }
+
+        if (data.chartType === "bar" && data.chartKey && data.chartValue && data.rows.length) {
+          const chart = document.createElement("div");
+          chart.style.marginTop = "12px";
+          data.rows.slice(0, 10).forEach((row) => {
+            const value = Number(row[data.chartValue]);
+            if (Number.isNaN(value)) return;
+            const label = document.createElement("div");
+            label.textContent = `${row[data.chartKey]}: ${value}`;
+            label.style.marginTop = "4px";
+            const bar = document.createElement("div");
+            bar.style.height = "8px";
+            bar.style.marginTop = "3px";
+            bar.style.background = "var(--primary)";
+            bar.style.borderRadius = "4px";
+            bar.style.width = `${Math.max(4, Math.min(100, Math.abs(value)))}%`;
+            chart.append(label, bar);
+          });
+          panel.appendChild(chart);
+        }
+
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = `Ledgerly · ${new Date().toLocaleTimeString("en-IN", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`;
+        panel.appendChild(meta);
+        messagesEl.appendChild(panel);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      function addPendingWrite(data) {
+        const panel = document.createElement("div");
+        panel.className = "msg bot";
+        const text = document.createElement("div");
+        text.textContent = `${data.reply || "I am ready to make this database change."} Please confirm:`;
+        const sql = document.createElement("code");
+        sql.textContent = data.sql;
+        sql.style.display = "block";
+        sql.style.margin = "10px 0";
+        sql.style.whiteSpace = "pre-wrap";
+        const confirm = document.createElement("button");
+        confirm.className = "btn btn-primary btn-sm";
+        confirm.textContent = "Confirm database change";
+        confirm.addEventListener("click", async () => {
+          confirm.disabled = true;
+          confirm.textContent = "Saving…";
+          const response = await api("/ai/confirm", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ sql: data.sql }),
+          });
+          if (response.ok) {
+            text.textContent = response.data.reply;
+            confirm.remove();
+            history.push({ role: "assistant", content: response.data.reply });
+          } else {
+            confirm.disabled = false;
+            confirm.textContent = "Confirm database change";
+            addMessage(response.data && response.data.error
+              ? response.data.error
+              : "The database change failed.", "bot");
+          }
+        });
+        panel.append(text, sql, confirm);
+        messagesEl.appendChild(panel);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      function addPendingAction(data) {
+        const panel = document.createElement("div");
+        panel.className = "msg bot";
+        const text = document.createElement("div");
+        text.textContent = `${data.reply} Total ₹${data.totalAmount}, paid ₹${data.amountPaid}, outstanding ₹${data.outstandingAmount}.`;
+        if (data.interpretationNote) {
+          text.textContent += ` Note: ${data.interpretationNote}`;
+        }
+        const phone = document.createElement("input");
+        phone.type = "tel";
+        phone.placeholder = "Customer phone number";
+        phone.style.display = data.needsPhone ? "block" : "none";
+        phone.style.margin = "10px 0";
+        const address = document.createElement("input");
+        address.type = "text";
+        address.placeholder = "Address (optional)";
+        address.style.display = data.needsPhone ? "block" : "none";
+        address.style.margin = "10px 0";
+        const confirm = document.createElement("button");
+        confirm.className = "btn btn-primary btn-sm";
+        confirm.textContent = data.action === "settle_full_outstanding"
+          ? "Confirm settlement"
+          : "Confirm sale";
+        confirm.addEventListener("click", async () => {
+          confirm.disabled = true;
+          if (data.needsPhone && !phone.value.trim()) {
+            confirm.disabled = false;
+            addMessage("Please enter the customer's phone number first.", "bot");
+            return;
+          }
+          const response = await api("/ai/confirm", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({
+              action: data.action,
+              customerName: data.customerName,
+              productName: data.productName,
+              quantity: data.quantity,
+              totalAmount: data.totalAmount,
+              amountPaid: data.amountPaid,
+              paymentMethod: data.paymentMethod,
+              phone: phone.value.trim(),
+              address: address.value.trim(),
+            }),
+          });
+          if (response.ok) {
+            text.textContent = response.data.reply +
+              ` Outstanding: ₹${response.data.outstandingAmount}.`;
+            confirm.remove();
+          } else {
+            confirm.disabled = false;
+            if (response.data && response.data.pendingAction) {
+              panel.remove();
+              addPendingAction(response.data);
+              return;
+            }
+            addMessage(response.data && response.data.error
+              ? response.data.error : "The sale could not be recorded.", "bot");
+          }
+        });
+        panel.append(text, phone, address, confirm);
+        messagesEl.appendChild(panel);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      const history = [];
+
+      async function sendMessage(e) {
+        e.preventDefault();
+        const text = input.value.trim();
+        if (!text) return;
+
+        addMessage(text, "user");
+        const previousHistory = history.slice(-10);
+        history.push({ role: "user", content: text });
+        input.value = "";
+        sendBtn.disabled = true;
+
+        try {
+          const response = await api("/ai/chat", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ message: text, history: previousHistory }),
+          });
+          if (response.status === 401) {
+            clearSession();
+            window.location.href = "login.html";
+            return;
+          }
+          if (!response.ok || !response.data || !response.data.reply) {
+            throw new Error(response.data && response.data.error
+              ? response.data.error
+              : "Unable to get an AI response");
+          }
+          if (response.data.pendingAction) {
+            addPendingAction(response.data);
+          } else if (response.data.pendingWrite) {
+            addPendingWrite(response.data);
+          } else {
+            addMessage(response.data.reply, "bot");
+            addQueryResult(response.data);
+          }
+          if (voiceOutputEnabled && response.data.reply) {
+            speakReply(response.data.reply).catch((error) => {
+              addMessage("Voice playback failed: " + error.message, "bot");
+            });
+          }
+          history.push({ role: "assistant", content: response.data.reply });
+        } catch (error) {
+          addMessage("Sorry, I couldn't reach the AI right now. " + error.message, "bot");
+        } finally {
+          sendBtn.disabled = false;
+          input.focus();
+        }
+      }
+
+      form.addEventListener("submit", sendMessage);
+
+      addMessage(
+        "Welcome to Ledgerly, " +
+          ((user && user.name) || "friend") +
+          "!\n\nAsk me anything about your ledger.",
+        "bot"
+      );
+    });
+  </script>
+</body>
+</html>

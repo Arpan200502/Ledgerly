@@ -1,0 +1,685 @@
+﻿================================================================================
+ LEDGERLY - COMPLETE CODEBASE EXPLAINER
+ (For someone who knows Node.js / Express but is NEW to Java / Spring Boot)
+================================================================================
+
+Hey. I wrote this assuming you know nothing about Java/Spring but you already
+know how web servers work (Express, fetch, JSON, routes, env vars, SQL).
+Every Java concept below is compared to something you already know from Node.
+
+--------------------------------------------------------------------------------
+ 0. THE BIG PICTURE - WHAT IS THIS PROJECT?
+--------------------------------------------------------------------------------
+
+Ledgerly is meant to eventually be a voice-powered ledger app ("khata") for
+Indian small shop owners. You SPEAK transactions ("Sharma ko 500 ka saman
+diya") and ASK questions ("Sharma ji ka kitna udhaar hai?") in
+Hindi/English/Hinglish, and the app talks back.
+
+That is the DREAM. What actually exists RIGHT NOW is tiny:
+
+  - A plain REST API with 5 endpoints (CRUD for "customers")
+  - A PostgreSQL table called "customers"
+  - NO voice, NO AI, NO React frontend, NO login, NO payments yet
+
+The big vision is documented in:
+  - README.md         -> fancy overview + architecture diagrams
+  - Ledgerly_SRS.md   -> full requirements doc (the "spec")
+  - PHASES.md         -> semester learning plan (Phase 1 = what we have)
+
+Think of README/SRS as your "product roadmap Figma" and the actual Java code
+as a barely-started MVP.
+
+--------------------------------------------------------------------------------
+ 1. PROJECT STRUCTURE (Node.js vs This Project)
+--------------------------------------------------------------------------------
+
+Node.js project usually looks like:
+
+  my-node-app/
+    package.json          <- dependencies + scripts
+    index.js              <- entry point
+    .env                  <- secrets/config
+    node_modules/         <- downloaded deps (gitignored)
+    src/
+      routes/users.js
+
+This Spring Boot project looks like:
+
+  ledgerly/
+    README.md, Ledgerly_SRS.md, PHASES.md   <- docs
+    backend/                                  <- THE ACTUAL APP
+      pom.xml                                 <- like package.json
+      mvnw, mvnw.cmd                          <- Maven wrapper (like npx)
+      .mvn/wrapper/                           <- wrapper config
+      src/
+        main/
+          java/com/ledgerly/                  <- your Java source code
+            LedgerlyApplication.java          <- entry point (like index.js)
+            CustomerController.java           <- routes (like routes/users.js)
+          resources/
+            application.properties            <- like .env (config)
+            schema.sql                        <- auto-run DB setup SQL
+        target/                               <- build output (gitignored, like dist/)
+
+Key mapping:
+  Node                    Java/Spring Boot
+  ----------------------  -------------------------
+  package.json            pom.xml
+  npm install             mvn install (auto via wrapper)
+  node index.js           mvn spring-boot:run
+  express()               @SpringBootApplication + auto-config
+  app.get('/users')       @GetMapping on a @RestController class
+  res.json({...})         return Map / ResponseEntity
+  process.env.PORT        server.port in application.properties
+  pg / mysql2 / prisma    JdbcTemplate (raw SQL, no ORM yet)
+  require('express')      Maven dependency in pom.xml
+  nodemon                 Spring Boot DevTools (not added yet)
+
+--------------------------------------------------------------------------------
+ 2. pom.xml  (the "package.json" of Java)
+--------------------------------------------------------------------------------
+
+File: backend/pom.xml
+
+What it does: tells Maven (Java's package manager) what this project is and
+what libraries it needs. When you run the build, Maven downloads these libs
+into a cache (like node_modules but global, in ~/.m2).
+
+The important parts:
+
+  <parent>
+    spring-boot-starter-parent  3.4.5
+  </parent>
+  -> This is like using a big shared config preset. It sets sensible
+     default versions for all Spring libraries so you don't have to pin
+     every single one. Similar to using a well-maintained meta-package.
+
+  <dependencies>
+    spring-boot-starter-web
+      -> Gives you an embedded web server (Tomcat) + Spring MVC.
+         Think: "npm install express" but it also starts a server for you.
+         In plain Node you'd do: npm i express + app.listen(3000).
+         Spring Boot bakes the server INTO the app. No separate server process.
+
+    spring-boot-starter-jdbc
+      -> Gives you JdbcTemplate for running raw SQL against a database.
+         Think: "npm install pg" but with Spring's helper methods around it.
+
+    org.postgresql:postgresql
+      -> The actual PostgreSQL driver (like the 'pg' npm package).
+         scope=runtime means "needed to run, not needed to compile".
+  </dependencies>
+
+  <build>
+    spring-boot-maven-plugin
+      -> Packages everything into one executable .jar file that contains
+         your code + all dependencies + the web server.
+         Like: "npm run build" that produces a single runnable bundle.
+  </build>
+
+  <properties>
+    java.version = 17
+  </properties>
+  -> Compile for Java 17. Your machine has Java 21 which is fine; Java 21
+     can compile code targeting 17.
+
+--------------------------------------------------------------------------------
+ 3. ENTRY POINT: LedgerlyApplication.java
+--------------------------------------------------------------------------------
+
+File: backend/src/main/java/com/ledgerly/LedgerlyApplication.java
+
+  @SpringBootApplication
+  public class LedgerlyApplication {
+      public static void main(String[] args) {
+          SpringApplication.run(LedgerlyApplication.class, args);
+      }
+  }
+
+Node equivalent:
+
+  // index.js
+  const app = express();
+  app.listen(3000);
+
+What @SpringBootApplication actually does (it's 3-in-1):
+  1. @Configuration      - "this class is a config source"
+  2. @EnableAutoConfiguration - "look at my pom.xml dependencies and
+     auto-wire everything. You have starter-web? I'll start a web server.
+     You have starter-jdbc? I'll create a JdbcTemplate bean for you."
+  3. @ComponentScan      - "look in this package (com.ledgerly) and all
+     sub-packages for my special annotations (@RestController etc.)
+     and register them."
+
+SpringApplication.run(...) :
+  - Reads application.properties
+  - Creates the web server
+  - Scans for controllers
+  - Connects to the database
+  - Runs schema.sql
+  - Starts listening on port 8081
+
+This is ALL the magic of Spring Boot. In Express you wire things manually.
+In Spring Boot, you declare dependencies and it wires itself. This is called
+"Convention over Configuration" / "Auto-configuration".
+
+--------------------------------------------------------------------------------
+ 4. THE CONTROLLER: CustomerController.java (your routes)
+--------------------------------------------------------------------------------
+
+File: backend/src/main/java/com/ledgerly/CustomerController.java
+
+This is the closest thing to an Express router. Let's break every annotation:
+
+  @RestController
+  -> Marks this class as "an HTTP endpoint handler".
+     Equivalent to: const router = express.Router();
+     It also automatically converts your return values to JSON
+     (like res.json() being called for you).
+
+  @RequestMapping("/customers")
+  -> All routes in this class are prefixed with /customers.
+     Equivalent to: const router = express.Router();
+                    router.use('/customers', customerRoutes);
+
+  public CustomerController(JdbcTemplate database) {
+      this.database = database;
+  }
+  -> This is DEPENDENCY INJECTION (DI). You did NOT write "new JdbcTemplate".
+     Spring saw that your constructor asks for a JdbcTemplate, checked its
+     auto-configuration, and handed you one that's already connected to
+     PostgreSQL. You just store it.
+
+     Node mental model: instead of
+        const db = require('./db');  // you import a singleton
+     Spring does:
+        constructor(db) { this.db = db; }  // Spring injects it for you
+     Same idea, inverted control.
+
+Now the 5 endpoints (compare to Express):
+
+  @GetMapping
+  public List<Map<String, Object>> getCustomers() {
+      return database.queryForList("SELECT * FROM customers ORDER BY id");
+  }
+  -> GET /customers
+     Runs SELECT, returns array of row-objects as JSON.
+     queryForList returns List<Map<String,Object>> which serializes to
+     a JSON array like: [{"id":1,"name":"Ravi",...}, ...]
+
+  @GetMapping("/{id}")
+  public ResponseEntity<Map<String, Object>> getCustomer(@PathVariable long id) {...}
+  -> GET /customers/123
+     @PathVariable grabs "123" from the URL (like req.params.id).
+     If not found: returns 404 (ResponseEntity.notFound()).
+     If found: returns 200 + the row.
+
+  @PostMapping
+  public Map<String, String> addCustomer(@RequestBody Map<String, String> customer) {...}
+  -> POST /customers
+     @RequestBody parses the JSON body into a Map (like req.body).
+     Runs INSERT, then returns what you sent back.
+     (Does not return the generated id yet - limitation for now.)
+
+  @PutMapping("/{id}")
+  public ResponseEntity<Map<String, String>> updateCustomer(...) {...}
+  -> PUT /customers/123
+     Runs UPDATE. Returns 404 if no rows changed, else 200 + body.
+
+  @DeleteMapping("/{id}")
+  public ResponseEntity<Void> deleteCustomer(...) {...}
+  -> DELETE /customers/123
+     Runs DELETE. Returns 204 No Content on success, 404 if nothing deleted.
+
+IMPORTANT DESIGN NOTE: There is NO Service layer and NO Repository layer
+yet. The controller talks directly to the database via JdbcTemplate.
+PHASES.md Phase 1 later asks for Entity + Repository + Service, but the
+current code is a simpler "Phase 0" version that works. That's fine for
+learning - you can see every SQL statement right here in the controller.
+
+--------------------------------------------------------------------------------
+ 5. DATABASE ACCESS: JdbcTemplate (raw SQL, like running pg queries)
+--------------------------------------------------------------------------------
+
+JdbcTemplate is Spring's helper around JDBC. It is NOT an ORM.
+You write actual SQL strings. Compare:
+
+  Node (pg):
+    const res = await pool.query('SELECT * FROM customers WHERE id = $1', [id]);
+    return res.rows;
+
+  Java (JdbcTemplate):
+    List<Map<String, Object>> rows = database.queryForList(
+        "SELECT * FROM customers WHERE id = ?", id);
+
+Differences to notice:
+  - Node uses $1, $2 placeholders. Java uses ?.
+  - queryForList returns List<Map<String,Object>>. Each Map is one row,
+    where keys are column names and values are cell values.
+  - update(...) is used for INSERT/UPDATE/DELETE. Returns number of rows
+    affected. Like res.rowCount in Node.
+
+Why no ORM (JPA/Hibernate) yet? The SRS mentions Spring Data JPA for the
+real app, but this first version intentionally uses plain SQL so you can
+see exactly what queries run. Later phases can refactor to JPA.
+
+--------------------------------------------------------------------------------
+ 6. CONFIG: application.properties (the .env file)
+--------------------------------------------------------------------------------
+
+File: backend/src/main/resources/application.properties
+
+  spring.application.name=ledgerly
+
+  spring.datasource.url=${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ledgerly}
+  spring.datasource.username=${SPRING_DATASOURCE_USERNAME:ledgerly}
+  spring.datasource.password=${SPRING_DATASOURCE_PASSWORD:ledgerly}
+
+  spring.sql.init.mode=always
+  server.port=${SERVER_PORT:8080}
+
+The ${VAR:default} syntax means:
+  "Read env var SPRING_DATASOURCE_URL; if it's not set, use this default."
+
+Same idea as:
+  const PORT = process.env.PORT || 8080;
+
+spring.sql.init.mode=always means:
+  "Every time the app starts, run schema.sql against the database."
+  (Safe because schema.sql uses CREATE TABLE IF NOT EXISTS.)
+
+server.port=8081 means the app listens on http://localhost:8081.
+
+To run with different credentials, set env vars first (PowerShell):
+
+  $env:SPRING_DATASOURCE_URL = "jdbc:postgresql://localhost:5432/ledgerly"
+  $env:SPRING_DATASOURCE_USERNAME = "ledgerly"
+  $env:SPRING_DATASOURCE_PASSWORD = "your_password"
+
+--------------------------------------------------------------------------------
+ 7. schema.sql (auto-migrated DB setup)
+--------------------------------------------------------------------------------
+
+File: backend/src/main/resources/schema.sql
+
+  CREATE TABLE IF NOT EXISTS customers (
+      id BIGSERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      email VARCHAR(150) NOT NULL,
+      phone VARCHAR(30) NOT NULL
+  );
+
+- BIGSERIAL = auto-incrementing integer (like SERIAL / identity column).
+  Roughly equivalent to: id SERIAL PRIMARY KEY in Postgres,
+  or a UUID auto-generated column in some Node setups.
+
+- This runs automatically on every app start because of
+  spring.sql.init.mode=always. You do not run it manually.
+
+- The full SRS schema (shops, users, transactions, products, etc.) is NOT
+  implemented yet. Only this simple customers table exists.
+
+--------------------------------------------------------------------------------
+ 8. THE ERROR THAT WAS BROKEN (and is now fixed)
+--------------------------------------------------------------------------------
+
+Before the fix, CustomerController.java had this method:
+
+  @PostMapping
+  public Map<String, Object> addCustomer(@RequestBody Map<String, String> customer) {
+      ...
+      return customer;   // <-- THIS LINE WAS THE BUG
+  }
+
+Why it failed:
+  - The method signature said "I return Map<String, Object>".
+  - But the parameter `customer` is Map<String, String>.
+  - You cannot return a Map<String, String> where Map<String, Object> is
+    expected, because Java generics are strict about types.
+  - Node equivalent of the confusion:
+      function addCustomer(customer) { return customer; }
+      // if you annotated it as returning a different type than what you
+      // actually return, TypeScript would scream. Java screams at compile
+      // time instead of runtime.
+
+The fix (applied):
+  - Changed the return type to Map<String, String> to match what is
+    actually returned (the input map).
+  - This also matches updateCustomer, which already returns Map<String, String>.
+
+  @PostMapping
+  public Map<String, String> addCustomer(@RequestBody Map<String, String> customer) {
+      ...
+      return customer;   // now types match
+  }
+
+After the fix: `mvn clean compile` and `mvn clean package` both succeed.
+
+--------------------------------------------------------------------------------
+ 9. HOW TO RUN IT (step by step)
+--------------------------------------------------------------------------------
+
+Prerequisites:
+  - Java 17+ installed (you have Java 21 - fine)
+  - PostgreSQL running locally
+  - A database named "ledgerly" exists
+
+Create the database (in psql or pgAdmin):
+  CREATE DATABASE ledgerly;
+
+Option A - using the Maven wrapper (no Maven install needed):
+
+  cd backend
+  .\mvnw.cmd spring-boot:run
+
+Option B - if you have Maven installed globally:
+
+  cd backend
+  mvn spring-boot:run
+
+Then test with curl or Postman:
+
+  # Create
+  curl -i -X POST http://localhost:8081/customers \
+    -H "Content-Type: application/json" \
+    -d "{\"name\":\"Ravi Sharma\",\"email\":\"ravi@example.com\",\"phone\":\"+91 9876543210\"}"
+
+  # List
+  curl http://localhost:8081/customers
+
+  # One
+  curl http://localhost:8081/customers/1
+
+  # Update
+  curl -i -X PUT http://localhost:8081/customers/1 \
+    -H "Content-Type: application/json" \
+    -d "{\"name\":\"Ravi S.\",\"email\":\"ravi@example.com\",\"phone\":\"+91 9876543210\"}"
+
+  # Delete
+  curl -i -X DELETE http://localhost:8081/customers/1
+
+Stop the server with Ctrl+C in the terminal where it's running.
+
+If PostgreSQL isn't running or credentials are wrong, the app will fail to
+start with a connection error - same as if your Postgres URL/password is
+wrong in a Node app.
+
+--------------------------------------------------------------------------------
+ 10. Maven WRAPPER - what is it and why does it matter?
+--------------------------------------------------------------------------------
+
+mvnw / mvnw.cmd  = "Maven Wrapper"
+
+Problem it solves: "Works on my machine" syndrome. Different people may have
+different Maven versions installed (or none at all).
+
+The wrapper is a tiny script that:
+  1. Checks .mvn/wrapper/maven-wrapper.properties for a Maven version
+  2. Downloads that exact version if you don't have it
+  3. Runs it
+
+Equivalent in Node world: using `npx create-react-app` instead of
+installing a global CLI, or committing a specific Node version via
+.nvmrc / engines field.
+
+Usage:
+  cd backend
+  .\mvnw.cmd clean compile       # compile only
+  .\mvnw.cmd spring-boot:run     # run the app
+  .\mvnw.cmd clean package       # build a runnable .jar
+
+Note: the wrapper lives in backend/ (next to pom.xml), which is correct
+for this single-module project. An earlier empty .mvn folder at the repo
+root was removed because it had no wrapper jar/properties and did nothing.
+
+--------------------------------------------------------------------------------
+ 11. Java vs Node - cheat sheet of things that will confuse you
+--------------------------------------------------------------------------------
+
+TYPES
+  Java is statically typed. Every variable has a type, checked at compile
+  time. Node/JS is dynamically typed (errors show up at runtime).
+  This is WHY the bug in section 8 existed - and why fixing it is a
+  one-line change, not a runtime crash.
+
+CLASSES vs FUNCTIONS
+  Node: you write functions, often exported from modules.
+  Java: you write classes. A "route file" is a class with annotated methods.
+        The framework calls your methods for you.
+
+NULL
+  Java has null. There is also Optional<T> in some Spring APIs to avoid
+  null checks. This codebase mostly uses null/empty-list checks instead.
+
+NPM vs MAVEN
+  npm: package.json lists deps, npm install downloads to node_modules.
+  Maven: pom.xml lists deps, mvn downloads to ~/.m2/repository (shared cache).
+
+  npm scripts  <->  Maven plugins/goals
+  "start"      <->  spring-boot:run
+  "build"      <->  package
+
+STATIC IMPORTS vs DEPENDENCY INJECTION
+  Node: const express = require('express'); const app = express();
+  Java: you declare a dependency in pom.xml, add @RestController, and
+        Spring hands you the objects you need via constructor injection.
+        You rarely "new up" framework objects yourself.
+
+JSON
+  Spring converts Java objects (Map, List, custom classes) to JSON
+  automatically when returned from @RestController methods.
+  This is like Express's res.json() but automatic.
+
+PORT
+  Node: app.listen(process.env.PORT || 3000);
+  Java: server.port=8081 in application.properties (with env override).
+
+--------------------------------------------------------------------------------
+ 12. What exists NOW vs what the docs PROMISE
+--------------------------------------------------------------------------------
+
+EXISTS AND WORKS (Phase 0 / simplified Phase 1):
+  - Spring Boot app boots
+  - PostgreSQL connection via application.properties
+  - customers table auto-created by schema.sql
+  - 5 REST endpoints: GET, GET/:id, POST, PUT/:id, DELETE/:id
+  - Raw SQL via JdbcTemplate
+  - Maven wrapper for running
+
+DOCUMENTED BUT NOT BUILT (see Ledgerly_SRS.md and PHASES.md):
+  - React frontend
+  - Groq AI (natural language to SQL)
+  - Sarvam voice STT/TTS
+  - Guardrail layer (SQL validation, SELECT-only, tenant scoping)
+  - Multi-tenancy (shops, shop_id everywhere)
+  - JWT authentication / Spring Security
+  - JPA/Hibernate entities and repositories
+  - UPI payment links + QR codes
+  - WhatsApp reminders via Twilio
+  - Analytics dashboard
+  - Transactions, products, inventory, payment_requests tables
+
+The SRS/README describe the FINAL product. The code is intentionally at the
+very first step: "get a boring CRUD app working so you learn Spring Boot."
+
+--------------------------------------------------------------------------------
+ 13. File-by-file summary (the entire codebase)
+--------------------------------------------------------------------------------
+
+README.md
+  Marketing/overview doc. Architecture diagrams (Mermaid), tech stack,
+  setup instructions. Mostly aspirational.
+
+Ledgerly_SRS.md
+  Software Requirements Specification. The real "source of truth" for what
+  the product should do: voice queries, guardrails, multi-tenancy, payments,
+  etc. Written to be fed to an AI coding agent as a spec.
+
+PHASES.md
+  Learning roadmap broken into 7 phases over a semester. Phase 1 = this
+  CRUD app. Later phases = schema, React, Groq, guardrails, voice, polish.
+
+backend/pom.xml
+  Maven build config. Declares Spring Boot 3.4.5 parent, Java 17, and 3
+  dependencies (web, jdbc, postgresql driver). Configures the boot plugin
+  to build an executable jar.
+
+backend/mvnw, mvnw.cmd, .mvn/wrapper/
+  Maven wrapper. Lets you build/run without a global Maven install.
+
+backend/src/main/java/com/ledgerly/LedgerlyApplication.java
+  Entry point. @SpringBootApplication + main() that calls
+  SpringApplication.run(). Starts the web server and auto-configures
+  everything.
+
+backend/src/main/java/com/ledgerly/CustomerController.java
+  The only REST controller. 5 endpoints for customer CRUD. Uses JdbcTemplate
+  to run raw SQL. NO service/repository layers yet - SQL lives here.
+
+backend/src/main/resources/application.properties
+  App config. DB URL/username/password (env-overridable), SQL init mode,
+  server port. Equivalent to .env in Node.
+
+backend/src/main/resources/schema.sql
+  CREATE TABLE IF NOT EXISTS customers (...). Runs automatically on startup.
+
+--------------------------------------------------------------------------------
+ 14. Suggested next steps (in learning order)
+--------------------------------------------------------------------------------
+
+1. Get PostgreSQL running and the app booting. Hit the endpoints with
+   curl/Postman. Break something on purpose to see error messages.
+
+2. Read CustomerController.java slowly. Map every annotation to the Node
+   equivalent listed in section 4.
+
+3. Then follow PHASES.md Phase 1 fully:
+   - Add spring-boot-starter-data-jpa to pom.xml
+   - Create a Customer @Entity class
+   - Create CustomerRepository extends JpaRepository
+   - Create a CustomerService layer
+   - Move SQL out of the controller
+   This is the "real" Spring Boot way and matches what the SRS expects.
+
+4. Phase 2: build the full multi-tenant schema from Ledgerly_SRS.md
+   Section 8 (shops, users, transactions, products, ...).
+
+5. Only after 3 and 4 should you touch AI/voice stuff (Phases 4-6).
+
+--------------------------------------------------------------------------------
+ 15. Commands quick reference
+--------------------------------------------------------------------------------
+
+  # compile
+  cd backend
+  .\mvnw.cmd clean compile
+
+  # run
+  .\mvnw.cmd spring-boot:run
+
+  # build jar
+  .\mvnw.cmd clean package
+  # then: java -jar target/ledgerly-backend-0.0.1-SNAPSHOT.jar
+
+  # stop app
+  Ctrl+C
+
+  # set DB creds (PowerShell)
+  $env:SPRING_DATASOURCE_URL = "jdbc:postgresql://localhost:5432/ledgerly"
+  $env:SPRING_DATASOURCE_USERNAME = "ledgerly"
+  $env:SPRING_DATASOURCE_PASSWORD = "your_password"
+
+================================================================================
+ END OF EXPLAINER
+================================================================================
+
+
+--------------------------------------------------------------------------------
+ 16. TROUBLESHOOTING NOTES (what we hit while getting this running)
+--------------------------------------------------------------------------------
+
+ISSUE 1: Compilation error in CustomerController
+  Fixed: return type of addCustomer changed from Map<String,Object> to
+  Map<String,String> to match what is actually returned.
+
+ISSUE 2: "password authentication failed for user ledgerly"
+  Cause: PostgreSQL had a "ledgerly" DATABASE but no "ledgerly" USER.
+  Fix (run as postgres superuser in psql):
+    CREATE ROLE ledgerly LOGIN PASSWORD 'ledgerly';
+    GRANT ALL PRIVILEGES ON DATABASE ledgerly TO ledgerly;
+    ALTER DATABASE ledgerly OWNER TO ledgerly;
+
+ISSUE 3: "Port 8080 was already in use"
+  Cause: An Apache httpd service (PEMHTTPD-x64) was listening on 8080.
+  Could not be stopped without admin rights.
+  Fix: Changed default server.port in application.properties to 8081.
+  If you ever free up 8080, you can switch back, or override per-run:
+     = "8080"
+
+HOW TO RUN (current, working setup):
+  1. PostgreSQL 18 must be running (it is - service postgresql-x64-18)
+  2. cd backend
+  3. .\mvnw.cmd spring-boot:run
+  4. App listens on http://localhost:8081
+  5. Test: curl http://localhost:8081/customers
+
+To stop the app: press Ctrl+C in the terminal running it,
+or kill the java process if it was started in background.
+
+DB credentials used by the app (from application.properties defaults):
+  URL:      jdbc:postgresql://localhost:5432/ledgerly
+  Username: ledgerly
+  Password: ledgerly
+
+--------------------------------------------------------------------------------
+ 17. FRONTEND + AUTH (what was just added)
+--------------------------------------------------------------------------------
+
+NEW PAGES (static, served by Spring Boot from src/main/resources/static/):
+  index.html   -> landing page (hero + features). If logged in, CTAs change
+                  to "Open chat" / "My profile".
+  signup.html  -> create account form -> POST /auth/signup
+  login.html   -> login form -> POST /auth/login
+  profile.html -> shows profile details, edit form, change password form
+  chat.html    -> main chat UI shell (placeholder bot replies for now)
+
+SHARED:
+  css/styles.css  -> all styling (no framework, plain CSS)
+  js/app.js       -> localStorage session helpers, fetch wrapper, navbar state
+
+HOW AUTH WORKS (simple token, JWT comes later):
+  1. Signup/login -> backend hashes password (SHA-256 + salt), stores a
+     random UUID token on the users row, returns { token, user }.
+  2. Frontend saves token + user in localStorage.
+  3. Every authenticated call sends:  Authorization: Bearer <token>
+  4. Backend looks up user by token. Logout sets token = NULL.
+
+  WARNING: SHA-256 + single salt + DB-stored token is FINE for a course
+  demo. Real apps use BCrypt/Argon2 + short-lived JWTs. That's Phase 2+
+  material (Spring Security) per the SRS.
+
+NEW API ENDPOINTS:
+  POST   /auth/signup          { name, email, password, phone? }
+  POST   /auth/login           { email, password }
+  GET    /users/me             (Bearer token) -> profile
+  PUT    /users/me             (Bearer token) { name?, email?, phone? }
+  PUT    /users/me/password    (Bearer token) { oldPassword, newPassword }
+  POST   /users/logout         (Bearer token)
+
+NEW DB TABLE (auto-created by schema.sql on startup):
+  users(id, name, email UNIQUE, phone, password_hash, token, created_at)
+
+HOW TO SEE IT:
+  1. App must be running:  cd backend && .\\mvnw.cmd spring-boot:run
+  2. Open:  http://localhost:8081
+  3. Sign up -> you land in chat.html
+  4. Click Profile in the navbar -> edit details / change password
+  5. Logout -> back to landing page
+
+TEST ACCOUNT ALREADY CREATED (from verification):
+  email:    arpan@test.com
+  password: secret2
+
+FLOW (what to click):
+  Landing -> Sign up -> auto-login -> Chat shell -> Profile -> Edit -> Logout

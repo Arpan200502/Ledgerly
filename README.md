@@ -21,6 +21,52 @@
 
 ## 📖 Overview
 
+## 🤖 Connect Groq AI
+
+The chat page sends authenticated requests to the backend at `POST /ai/chat`.
+The Groq API key is only read by Spring Boot and is never exposed to the browser.
+
+Create a `.env` file in the repository root (it is gitignored):
+
+```env
+GROQ_API_KEY=gsk_your_key_here
+GROQ_MODEL=openai/gpt-oss-20b
+```
+
+Then start the backend:
+
+```powershell
+cd backend
+.\mvnw.cmd spring-boot:run
+```
+
+Open http://localhost:8081/chat.html, log in, and send a message. The backend
+uses a Ledgerly-specific system prompt and forwards the last ten chat messages
+to Groq for conversational context.
+
+For database questions, Groq receives the current `customers` schema and returns
+structured JSON containing a PostgreSQL `SELECT` query. The backend validates the
+query, allows access only to the `customers` table, applies a five-second timeout
+and 100-row cap, executes it, and sends the SQL plus results back to the chat UI.
+The UI renders a result table and a simple bar visualization when the response
+contains suitable numeric columns. Writes are intentionally not enabled in this
+path and the current schema does not yet contain balances or transactions.
+
+The data model now covers real shop activity: customer contact/address details,
+products and stock, sales, sale items with quantity and price, and payments.
+Outstanding balances are derived from sales minus payments, while the original
+ledger entries table remains available for simple credit/payment adjustments.
+Natural-language writes are supported with confirmation. Requests such as
+"add Ravi Sharma with phone 123", "Sharma bought 2 bags of rice at 500 each",
+or "Sharma paid 200" are converted into an appropriate customer, product, sale,
+sale-item, or payment statement, shown in the chat, and executed only after the
+user clicks **Confirm database change**. A request to "close", "settle", or
+"clear" a ledger records a payment and preserves history; explicit "delete" or
+"remove" requests can generate a confirmed delete instead. Deleting a customer
+with related sales or payments may be rejected by the database so transaction
+history cannot be removed accidentally. Authentication tables and secrets are
+never available to the AI query path.
+
 Ledgerly is a **multi-tenant SaaS platform** designed for small business owners in India — kirana stores, clinics, tailors, and small shops. It replaces the traditional handwritten **khata** (ledger book) with a voice-first digital experience, enabling shopkeepers to:
 
 - 🗣️ **Speak** transactions into existence in Hindi, English, or Hinglish
@@ -384,23 +430,65 @@ gantt
 - Node.js 18+ & npm
 - Git
 
-### Backend Setup
+The repository now includes a Maven Wrapper, so Maven does not need to be installed
+globally. Java 17 or newer is still required.
 
-```bash
-# Clone the repository
-git clone https://github.com/ArpanMukherjee/ledgerly.git
-cd ledgerly
+### Simple Backend Setup
 
-# Navigate to backend
+The backend is intentionally small. It uses Spring Boot, plain SQL through
+`JdbcTemplate`, and a PostgreSQL database. There is no Docker, JPA, service
+layer, DTO layer, or authentication yet.
+
+1. Install PostgreSQL and create a database named `ledgerly`.
+2. Set the database values in your terminal if they differ from the defaults:
+
+```powershell
+$env:SPRING_DATASOURCE_URL = "jdbc:postgresql://localhost:5432/ledgerly"
+$env:SPRING_DATASOURCE_USERNAME = "ledgerly"
+$env:SPRING_DATASOURCE_PASSWORD = "your_password"
+```
+
+3. Start the backend:
+
+```powershell
 cd backend
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your database credentials and API keys
-
-# Run the application
 mvn spring-boot:run
 ```
+
+`schema.sql` creates the `customers` table automatically when the application
+starts.
+
+### Basic Customer CRUD API
+
+The current backend has one controller and five basic endpoints:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/customers` | List all customers |
+| GET | `/customers/{id}` | Fetch one customer |
+| POST | `/customers` | Create a customer |
+| PUT | `/customers/{id}` | Update a customer |
+| DELETE | `/customers/{id}` | Delete a customer |
+
+Example request:
+
+```bash
+curl -i -X POST http://localhost:8080/customers \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"Ravi Sharma\",\"email\":\"ravi@example.com\",\"phone\":\"+91 9876543210\"}"
+```
+
+The request body is simple JSON:
+
+```json
+{
+  "name": "Ravi Sharma",
+  "email": "ravi@example.com",
+  "phone": "+91 9876543210"
+}
+```
+
+The authenticated AI endpoint is documented in the Groq setup section above.
 
 ### Frontend Setup
 
@@ -449,46 +537,30 @@ ledgerly/
 ├── Ledgerly_SRS.md              # Full SRS document
 ├── PHASES.md                    # Development phases
 │
-├── backend/                     # Spring Boot application
+├── backend/                     # Small Spring Boot application
 │   ├── pom.xml
 │   └── src/main/java/com/ledgerly/
 │       ├── LedgerlyApplication.java
-│       ├── controller/          # REST controllers
-│       ├── service/             # Business logic
-│       ├── repository/          # JPA repositories
-│       ├── entity/              # JPA entities
-│       ├── security/            # JWT + Spring Security
-│       └── config/              # DataSource config
+│       └── CustomerController.java
+│   └── src/main/resources/
+│       ├── application.properties
+│       └── schema.sql
 │
-└── frontend/                    # React SPA
-    ├── package.json
-    └── src/
-        ├── components/          # UI components
-        ├── services/            # API layer
-        └── ...
+└── frontend/                    # Planned
 ```
 
 ---
 
-## 📊 API Endpoints
+## 📊 Current API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/auth/signup` | Create shop + owner account |
-| `POST` | `/api/auth/login` | Authenticate, return JWT |
-| `POST` | `/api/voice/query` | Voice/text read query |
-| `POST` | `/api/voice/action` | Voice/text write action |
-| `POST` | `/api/voice/action/confirm` | Confirm/reject pending write |
-| `GET` | `/api/customers` | List customers |
-| `POST` | `/api/customers` | Add customer |
-| `GET` | `/api/customers/{id}/history` | Transaction audit trail |
-| `POST` | `/api/transactions` | Manual transaction entry |
-| `POST` | `/api/payment-requests` | Generate UPI link/QR |
-| `POST` | `/api/payment-requests/{id}/settle` | Mark payment settled |
-| `GET` | `/api/dashboard/summary` | Analytics data |
-| `GET` | `/api/products` | List inventory |
-| `POST` | `/api/products` | Add/update product |
-| `POST` | `/api/reminders/overdue` | Send WhatsApp reminders |
+| `GET` | `/customers` | List customers |
+| `GET` | `/customers/{id}` | Get one customer |
+| `POST` | `/customers` | Add customer |
+| `PUT` | `/customers/{id}` | Update customer |
+| `DELETE` | `/customers/{id}` | Delete customer |
+| `POST` | `/ai/chat` | Send an authenticated message to the Groq-powered Ledgerly copilot |
 
 ---
 

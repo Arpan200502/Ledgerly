@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Profile — Ledgerly</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="index.html">Ledger<span>ly</span></a>
+    <div class="nav-links">
+      <div id="nav-guest" class="nav-links" style="display:flex; gap:10px;">
+        <a href="login.html">Login</a>
+        <a class="btn btn-primary btn-sm" href="signup.html">Sign up</a>
+      </div>
+      <div id="nav-authed" class="nav-user" style="display:none;">
+        <a href="chat.html">Chat</a>
+        <a href="profile.html" style="color:var(--primary); font-weight:700;">Profile</a>
+        <div class="nav-user">
+          <span id="nav-user-name" class="name">User</span>
+          <div id="nav-avatar" class="avatar">U</div>
+        </div>
+        <a href="#" id="btn-logout" class="btn btn-ghost btn-sm">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <h1 class="page-title">My profile</h1>
+    <p class="page-sub">Your Ledgerly account details</p>
+
+    <div id="error-box" class="form-error" style="display:none;"></div>
+    <div id="success-box" class="form-success" style="display:none;"></div>
+
+    <div class="profile-grid">
+      <div class="card">
+        <div class="profile-header">
+          <div id="profile-avatar" class="avatar-lg">?</div>
+          <div>
+            <h2 id="profile-name">Loading…</h2>
+            <p id="profile-email"></p>
+          </div>
+        </div>
+        <div class="section-title">Account details</div>
+        <div class="detail-row">
+          <span class="label">Name</span>
+          <span class="value" id="detail-name">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">Email</span>
+          <span class="value" id="detail-email">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">Phone</span>
+          <span class="value" id="detail-phone">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">Member since</span>
+          <span class="value" id="detail-created">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">User ID</span>
+          <span class="value" id="detail-id">—</span>
+        </div>
+        <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap;">
+          <a class="btn btn-primary" href="chat.html">Open chat</a>
+          <a class="btn btn-ghost" href="index.html">Back to home</a>
+        </div>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom:18px;">
+          <div class="section-title">Edit profile</div>
+          <form id="profile-form">
+            <div class="form-group">
+              <label for="edit-name">Full name</label>
+              <input type="text" id="edit-name" required />
+            </div>
+            <div class="form-group">
+              <label for="edit-email">Email</label>
+              <input type="email" id="edit-email" required />
+            </div>
+            <div class="form-group">
+              <label for="edit-phone">Phone</label>
+              <input type="tel" id="edit-phone" />
+            </div>
+            <button type="submit" class="btn btn-primary" id="profile-save-btn">Save changes</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="section-title">Change password</div>
+          <form id="password-form">
+            <div class="form-group">
+              <label for="old-password">Current password</label>
+              <input type="password" id="old-password" required autocomplete="current-password" />
+            </div>
+            <div class="form-group">
+              <label for="new-password">New password</label>
+              <input type="password" id="new-password" required minlength="6" autocomplete="new-password" />
+            </div>
+            <button type="submit" class="btn btn-outline" id="password-save-btn">Update password</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script>
+    let currentUser = null;
+
+    function renderUser(user) {
+      currentUser = user;
+      const initialsText = initials(user.name);
+
+      document.getElementById("profile-avatar").textContent = initialsText;
+      document.getElementById("profile-name").textContent = user.name || "—";
+      document.getElementById("profile-email").textContent = user.email || "";
+      document.getElementById("detail-name").textContent = user.name || "—";
+      document.getElementById("detail-email").textContent = user.email || "—";
+      document.getElementById("detail-phone").textContent = user.phone || "—";
+      document.getElementById("detail-created").textContent = formatCreatedAt(user.created_at);
+      document.getElementById("detail-id").textContent = user.id != null ? "#" + user.id : "—";
+
+      document.getElementById("edit-name").value = user.name || "";
+      document.getElementById("edit-email").value = user.email || "";
+      document.getElementById("edit-phone").value = user.phone || "";
+
+      document.getElementById("nav-user-name").textContent = user.name || "User";
+      document.getElementById("nav-avatar").textContent = initialsText;
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      if (!requireAuth()) return;
+
+      const errorBox = document.getElementById("error-box");
+      const successBox = document.getElementById("success-box");
+
+      async function loadProfile() {
+        const result = await api("/users/me", { headers: authHeaders() });
+        if (!result.ok) {
+          if (result.status === 401) {
+            clearSession();
+            window.location.href = "login.html";
+            return;
+          }
+          showError(errorBox, (result.data && result.data.error) || "Could not load profile.");
+          return;
+        }
+        renderUser(result.data);
+        setSession(getToken(), result.data);
+      }
+
+      await loadProfile();
+
+      document.getElementById("profile-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        hideMessage(errorBox);
+        hideMessage(successBox);
+
+        const btn = document.getElementById("profile-save-btn");
+        btn.disabled = true;
+        btn.textContent = "Saving…";
+
+        try {
+          const result = await api("/users/me", {
+            method: "PUT",
+            headers: authHeaders(),
+            body: JSON.stringify({
+              name: document.getElementById("edit-name").value,
+              email: document.getElementById("edit-email").value,
+              phone: document.getElementById("edit-phone").value,
+            }),
+          });
+
+          if (result.ok) {
+            renderUser(result.data);
+            setSession(getToken(), result.data);
+            showSuccess(successBox, "Profile updated.");
+          } else {
+            showError(errorBox, (result.data && result.data.error) || "Update failed.");
+          }
+        } catch {
+          showError(errorBox, "Network error.");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Save changes";
+        }
+      });
+
+      document.getElementById("password-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        hideMessage(errorBox);
+        hideMessage(successBox);
+
+        const btn = document.getElementById("password-save-btn");
+        btn.disabled = true;
+        btn.textContent = "Updating…";
+
+        try {
+          const result = await api("/users/me/password", {
+            method: "PUT",
+            headers: authHeaders(),
+            body: JSON.stringify({
+              oldPassword: document.getElementById("old-password").value,
+              newPassword: document.getElementById("new-password").value,
+            }),
+          });
+
+          if (result.ok) {
+            showSuccess(successBox, "Password updated successfully.");
+            document.getElementById("password-form").reset();
+          } else {
+            showError(errorBox, (result.data && result.data.error) || "Password update failed.");
+          }
+        } catch {
+          showError(errorBox, "Network error.");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Update password";
+        }
+      });
+    });
+  </script>
+</body>
+</html>
