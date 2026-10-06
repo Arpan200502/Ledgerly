@@ -405,6 +405,12 @@
 
       form.addEventListener("submit", sendMessage);
 
+      const initialPrompt = new URLSearchParams(window.location.search).get("prompt");
+      if (initialPrompt) {
+        input.value = initialPrompt;
+        input.focus();
+      }
+
       addMessage(
         "Welcome to Ledgerly, " +
           ((user && user.name) || "friend") +

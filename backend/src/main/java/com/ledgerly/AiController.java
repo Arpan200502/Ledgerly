@@ -197,6 +197,17 @@ public class AiController {
         if (isAllBalancesRequest(request.message())) {
             return allCustomerBalances();
         }
+        if (isPurchaseAndBalanceRequest(request.message())) {
+            String mentionedCustomer = findMentionedCustomer(request.message());
+            if (mentionedCustomer != null) {
+                return customerPurchaseSummary(mentionedCustomer);
+            }
+            return ResponseEntity.ok(Map.of(
+                    "reply", "Which customer should I look up?",
+                    "sql", "",
+                    "rows", List.of(),
+                    "chartType", "none"));
+        }
         String settlementCustomer = findSettlementCustomer(request.message());
         if (settlementCustomer != null) {
             return pendingSettlement(new AiResult(
@@ -894,6 +905,59 @@ public class AiController {
         return normalized.matches("(?s).*(show|list|give|display|tell|what are).*")
                 && normalized.matches("(?s).*(all|every|each).*")
                 && normalized.matches("(?s).*(outstanding|balance|due|udhaar).*");
+    }
+
+    private boolean isPurchaseAndBalanceRequest(String message) {
+        String normalized = message.toLowerCase(Locale.ROOT);
+        boolean asksPurchases = normalized.matches(
+                "(?s).*(bought|purchased|purchase|bought\\s+(?:so\\s+far|till\\s+now)|what\\s+.*bought).*");
+        boolean asksBalance = normalized.matches(
+                "(?s).*(outstanding|outstandings|balance|due|udhaar|owes|owed|what\\s+.*(?:has|owes)).*");
+        return asksPurchases && asksBalance;
+    }
+
+    private String findMentionedCustomer(String message) {
+        String normalizedMessage = normalizeCustomerText(message);
+        List<String> customerNames = database.query(
+                "SELECT name FROM customers ORDER BY LENGTH(name) DESC, id",
+                (resultSet, rowNum) -> resultSet.getString("name"));
+        return customerNames.stream()
+                .filter(name -> normalizedMessage.contains(normalizeCustomerText(name)))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String normalizeCustomerText(String text) {
+        return text.toLowerCase(Locale.ROOT)
+                .replaceAll("[^\\p{L}\\p{N}]+", " ")
+                .trim()
+                .replaceAll("\\s+", " ");
+    }
+
+    private ResponseEntity<Map<String, Object>> customerPurchaseSummary(String customerName) {
+        Map<String, Object> balance = findCustomerBalance(customerName);
+        if (balance == null) {
+            return error(422, "I could not find " + customerName + " in your customers.");
+        }
+        List<Map<String, Object>> purchases = database.queryForList(
+                "SELECT si.product_name, si.quantity, si.unit_price, si.line_total, s.sold_at "
+                        + "FROM sales s JOIN sale_items si ON si.sale_id = s.id "
+                        + "WHERE s.customer_id = ? ORDER BY s.sold_at DESC LIMIT 100",
+                balance.get("customer_id"));
+        double outstanding = ((Number) balance.get("outstanding")).doubleValue();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("reply", "Here is " + balance.get("customer_name") + "'s purchase history. "
+                + "Current outstanding balance: ₹" + String.format(Locale.ROOT, "%.2f", outstanding) + ".");
+        result.put("sql", "Two safe queries: purchase history and customer_balances");
+        result.put("rows", purchases);
+        result.put("rowCount", purchases.size());
+        result.put("chartType", "table");
+        result.put("chartTitle", "Purchases for " + balance.get("customer_name"));
+        result.put("chartKey", "product_name");
+        result.put("chartValue", "line_total");
+        result.put("outstandingAmount", outstanding);
+        result.put("balanceCustomer", balance.get("customer_name"));
+        return ResponseEntity.ok(result);
     }
 
     private ResponseEntity<Map<String, Object>> allCustomerBalances() {
