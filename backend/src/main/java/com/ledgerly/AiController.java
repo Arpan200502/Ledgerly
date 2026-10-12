@@ -7,7 +7,12 @@ import java.util.Map;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
+import java.util.Set;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -311,7 +316,8 @@ public class AiController {
                 pending.put("outstandingAmount", aiResult.totalAmount() - aiResult.amountPaid());
                 pending.put("paymentMethod", aiResult.paymentMethod());
                 pending.put("interpretationNote", aiResult.interpretationNote() == null
-                        ? "" : aiResult.interpretationNote());
+                        ? ""
+                        : aiResult.interpretationNote());
                 return ResponseEntity.ok(pending);
             }
             if ("settle_full_outstanding".equals(aiResult.action())) {
@@ -442,8 +448,8 @@ public class AiController {
         }
         try {
             if ("settle_full_outstanding".equals(request.action())) {
-                return ResponseEntity.ok(transactionTemplate.execute(status ->
-                        settleFullOutstanding(request.customerName())));
+                return ResponseEntity
+                        .ok(transactionTemplate.execute(status -> settleFullOutstanding(request.customerName())));
             }
             if (request.action() != null
                     && ("record_sale".equals(request.action())
@@ -458,8 +464,8 @@ public class AiController {
                 if ("record_sale".equals(request.action()) && !customerExists(command.customerName())) {
                     return ResponseEntity.ok(missingCustomerResponse(command));
                 }
-                return ResponseEntity.ok(transactionTemplate.execute(status ->
-                        recordSale(command, request.phone(), request.address())));
+                return ResponseEntity.ok(
+                        transactionTemplate.execute(status -> recordSale(command, request.phone(), request.address())));
             }
             if (request.sql() == null) {
                 return error(400, "sql or action is required");
@@ -487,64 +493,64 @@ public class AiController {
     }
 
     private Map<String, Object> recordSale(SaleCommand command, String phone, String address) {
-            Long customerId = database.query(
-                    "SELECT id FROM customers WHERE LOWER(name) = LOWER(?)"
-                            + " OR LOWER(name) LIKE LOWER(?) ORDER BY id LIMIT 1",
-                    ps -> {
-                        ps.setString(1, command.customerName().trim());
-                        ps.setString(2, command.customerName().trim() + " %");
-                    },
-                    rs -> rs.next() ? rs.getLong("id") : null);
-            if (customerId == null) {
-                if (phone == null || phone.isBlank()) {
-                    throw new IllegalArgumentException("phone number is required for new customer");
-                }
+        Long customerId = database.query(
+                "SELECT id FROM customers WHERE LOWER(name) = LOWER(?)"
+                        + " OR LOWER(name) LIKE LOWER(?) ORDER BY id LIMIT 1",
+                ps -> {
+                    ps.setString(1, command.customerName().trim());
+                    ps.setString(2, command.customerName().trim() + " %");
+                },
+                rs -> rs.next() ? rs.getLong("id") : null);
+        if (customerId == null) {
+            if (phone == null || phone.isBlank()) {
+                throw new IllegalArgumentException("phone number is required for new customer");
+            }
 
-                database.update(
-                        "INSERT INTO customers (name, email, phone, address) VALUES (?, ?, ?, ?)",
-                        command.customerName().trim(),
-                        command.customerName().trim().toLowerCase().replaceAll("\\s+", ".") + "@ledgerly.local",
-                        phone.trim(), address);
-                customerId = database.query(
-                        "SELECT id FROM customers WHERE LOWER(name) = LOWER(?) ORDER BY id DESC LIMIT 1",
-                        ps -> ps.setString(1, command.customerName().trim()),
-                        rs -> rs.next() ? rs.getLong("id") : null);
-            }
-            long productId = database.query(
-                    "SELECT id FROM products WHERE LOWER(name) = LOWER(?) ORDER BY id LIMIT 1",
-                    ps -> ps.setString(1, command.productName().trim()),
-                    rs -> rs.next() ? rs.getLong("id") : 0L);
-            if (productId == 0L) {
-                database.update("INSERT INTO products (name, selling_price) VALUES (?, ?)",
-                        command.productName().trim(), command.totalAmount() / command.quantity());
-                productId = database.queryForObject(
-                        "SELECT id FROM products WHERE LOWER(name) = LOWER(?) ORDER BY id DESC LIMIT 1",
-                        Long.class, command.productName().trim());
-            }
-            String status = command.amountPaid() <= 0 ? "PENDING"
-                    : command.amountPaid() >= command.totalAmount() ? "PAID" : "PARTIAL";
             database.update(
-                    "INSERT INTO sales (customer_id, total_amount, amount_paid, payment_status, notes) VALUES (?, ?, ?, ?, ?)",
-                    customerId, command.totalAmount(), command.amountPaid(), status, "Recorded by Ledgerly AI");
-            Long saleId = database.queryForObject(
-                    "SELECT id FROM sales WHERE customer_id = ? ORDER BY id DESC LIMIT 1", Long.class, customerId);
+                    "INSERT INTO customers (name, email, phone, address) VALUES (?, ?, ?, ?)",
+                    command.customerName().trim(),
+                    command.customerName().trim().toLowerCase().replaceAll("\\s+", ".") + "@ledgerly.local",
+                    phone.trim(), address);
+            customerId = database.query(
+                    "SELECT id FROM customers WHERE LOWER(name) = LOWER(?) ORDER BY id DESC LIMIT 1",
+                    ps -> ps.setString(1, command.customerName().trim()),
+                    rs -> rs.next() ? rs.getLong("id") : null);
+        }
+        long productId = database.query(
+                "SELECT id FROM products WHERE LOWER(name) = LOWER(?) ORDER BY id LIMIT 1",
+                ps -> ps.setString(1, command.productName().trim()),
+                rs -> rs.next() ? rs.getLong("id") : 0L);
+        if (productId == 0L) {
+            database.update("INSERT INTO products (name, selling_price) VALUES (?, ?)",
+                    command.productName().trim(), command.totalAmount() / command.quantity());
+            productId = database.queryForObject(
+                    "SELECT id FROM products WHERE LOWER(name) = LOWER(?) ORDER BY id DESC LIMIT 1",
+                    Long.class, command.productName().trim());
+        }
+        String status = command.amountPaid() <= 0 ? "PENDING"
+                : command.amountPaid() >= command.totalAmount() ? "PAID" : "PARTIAL";
+        database.update(
+                "INSERT INTO sales (customer_id, total_amount, amount_paid, payment_status, notes) VALUES (?, ?, ?, ?, ?)",
+                customerId, command.totalAmount(), command.amountPaid(), status, "Recorded by Ledgerly AI");
+        Long saleId = database.queryForObject(
+                "SELECT id FROM sales WHERE customer_id = ? ORDER BY id DESC LIMIT 1", Long.class, customerId);
+        database.update(
+                "INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?)",
+                saleId, productId, command.productName().trim(), command.quantity(),
+                command.totalAmount() / command.quantity(), command.totalAmount());
+        if (command.amountPaid() > 0) {
             database.update(
-                    "INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?)",
-                    saleId, productId, command.productName().trim(), command.quantity(),
-                    command.totalAmount() / command.quantity(), command.totalAmount());
-            if (command.amountPaid() > 0) {
-                database.update(
-                        "INSERT INTO payments (customer_id, sale_id, amount, payment_method, notes) VALUES (?, ?, ?, ?, ?)",
-                        customerId, saleId, command.amountPaid(), command.paymentMethod(), "Recorded by Ledgerly AI");
-            }
-            return Map.of(
-                    "reply", "Sale recorded successfully.",
-                    "saleId", saleId,
-                    "totalAmount", command.totalAmount(),
-                    "amountPaid", command.amountPaid(),
-                    "outstandingAmount", command.totalAmount() - command.amountPaid(),
-                    "paymentStatus", status,
-                    "pendingWrite", false);
+                    "INSERT INTO payments (customer_id, sale_id, amount, payment_method, notes) VALUES (?, ?, ?, ?, ?)",
+                    customerId, saleId, command.amountPaid(), command.paymentMethod(), "Recorded by Ledgerly AI");
+        }
+        return Map.of(
+                "reply", "Sale recorded successfully.",
+                "saleId", saleId,
+                "totalAmount", command.totalAmount(),
+                "amountPaid", command.amountPaid(),
+                "outstandingAmount", command.totalAmount() - command.amountPaid(),
+                "paymentStatus", status,
+                "pendingWrite", false);
     }
 
     private Map<String, Object> missingCustomerResponse(SaleCommand command) {
@@ -639,8 +645,8 @@ public class AiController {
         }
 
         if (content.isBlank()) {
-        throw new JsonProcessingException("AI returned no structured command") {
-        };
+            throw new JsonProcessingException("AI returned no structured command") {
+            };
         }
         JsonNode json = objectMapper.readTree(content);
         if (!json.isObject()) {
@@ -981,7 +987,8 @@ public class AiController {
         boolean hasPayments = false;
         Matcher matcher = Pattern.compile(
                 "(?i)\\b(?:from|join)\\s+(?:only\\s+)?(?:[a-z_][a-z0-9_]*\\.)?"
-                        + "(sales|payments)\\b").matcher(sql);
+                        + "(sales|payments)\\b")
+                .matcher(sql);
         while (matcher.find()) {
             if (parenthesisDepthAt(sql, matcher.start()) != 0) {
                 continue;
@@ -1034,6 +1041,103 @@ public class AiController {
         } catch (JsonProcessingException ignored) {
             return "check the backend log for details";
         }
+    }
+    // ================= Query history (sidebar) =================
+
+    private static final Set<String> HISTORY_TYPES = Set.of("READ", "WRITE", "CHAT");
+    private static final Set<String> HISTORY_STATUSES = Set.of("SUCCESS", "PENDING", "CONFIRMED", "FAILED");
+
+    public record HistoryEntry(String question, String generatedSql, String queryType, String status, String reply) {
+    }
+
+    public record StatusUpdate(String status, String reply) {
+    }
+
+    /**
+     * GET /ai/history?q=sharma -> this user's latest 50 entries (optional search).
+     */
+    @GetMapping("/history")
+    public ResponseEntity<?> historyList(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @RequestParam(value = "q", required = false) String q) {
+        Long userId = findUserIdByToken(auth);
+        if (userId == null) {
+            return error(401, "unauthorized — please login again");
+        }
+        String like = "%" + (q == null ? "" : q.trim().toLowerCase()) + "%";
+        return ResponseEntity.ok(database.queryForList(
+                "SELECT id, question, generated_sql, query_type, status, reply, created_at "
+                        + "FROM query_history WHERE user_id = ? AND LOWER(question) LIKE ? "
+                        + "ORDER BY created_at DESC, id DESC LIMIT 50",
+                userId, like));
+    }
+
+    /** POST /ai/history -> saves one entry and returns {"id": ...}. */
+    @PostMapping(value = "/history", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> historySave(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @RequestBody HistoryEntry entry) {
+        Long userId = findUserIdByToken(auth);
+        if (userId == null) {
+            return error(401, "unauthorized — please login again");
+        }
+        if (entry == null || entry.question() == null || entry.question().isBlank()) {
+            return error(400, "question is required");
+        }
+        String type = HISTORY_TYPES.contains(entry.queryType()) ? entry.queryType() : "CHAT";
+        String status = HISTORY_STATUSES.contains(entry.status()) ? entry.status() : "SUCCESS";
+        Long id = database.queryForObject(
+                "INSERT INTO query_history (user_id, question, generated_sql, query_type, status, reply) "
+                        + "VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+                Long.class,
+                userId,
+                cutText(entry.question(), 4000),
+                cutText(entry.generatedSql(), 8000),
+                type,
+                status,
+                cutText(entry.reply(), 2000));
+        return ResponseEntity.ok(Map.of("id", id));
+    }
+
+    /** PATCH /ai/history/{id} -> PENDING becomes CONFIRMED or FAILED. */
+    @PatchMapping(value = "/history/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> historyUpdate(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @PathVariable("id") long id,
+            @RequestBody StatusUpdate update) {
+        Long userId = findUserIdByToken(auth);
+        if (userId == null) {
+            return error(401, "unauthorized — please login again");
+        }
+        if (update == null || !HISTORY_STATUSES.contains(update.status())) {
+            return error(400, "valid status is required");
+        }
+        int changed = database.update(
+                "UPDATE query_history SET status = ?, reply = COALESCE(?, reply) WHERE id = ? AND user_id = ?",
+                update.status(), cutText(update.reply(), 2000), id, userId);
+        if (changed == 0) {
+            return error(404, "history entry not found");
+        }
+        return ResponseEntity.ok(Map.of("updated", true));
+    }
+
+    /** DELETE /ai/history -> clears the current user's history. */
+    @DeleteMapping("/history")
+    public ResponseEntity<?> historyClear(
+            @RequestHeader(value = "Authorization", required = false) String auth) {
+        Long userId = findUserIdByToken(auth);
+        if (userId == null) {
+            return error(401, "unauthorized — please login again");
+        }
+        int removed = database.update("DELETE FROM query_history WHERE user_id = ?", userId);
+        return ResponseEntity.ok(Map.of("deleted", removed));
+    }
+
+    private static String cutText(String value, int max) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.length() <= max ? value : value.substring(0, max);
     }
 
     private Long findUserIdByToken(String auth) {

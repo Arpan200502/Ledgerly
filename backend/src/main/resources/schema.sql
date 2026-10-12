@@ -88,3 +88,14 @@ SELECT
         - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.customer_id = c.id), 0)
         AS outstanding
 FROM customers c;
+CREATE TABLE IF NOT EXISTS query_history (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    generated_sql TEXT,
+    query_type VARCHAR(10) NOT NULL DEFAULT 'CHAT' CHECK (query_type IN ('READ','WRITE','CHAT')),
+    status VARCHAR(10) NOT NULL DEFAULT 'SUCCESS' CHECK (status IN ('SUCCESS','PENDING','CONFIRMED','FAILED')),
+    reply TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_query_history_user_created ON query_history(user_id, created_at DESC);
