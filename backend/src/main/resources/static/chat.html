@@ -37,6 +37,10 @@
     .st-failed { background: rgba(248, 113, 113, 0.15); color: #f87171; }
     .history-empty { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 24px 10px; }
 
+    /* Language selector */
+    #lang-select { background: var(--bg); }
+    #lang-select option { background: var(--surface); color: var(--text); }
+
     @media (max-width: 900px) {
       .history-panel { position: absolute; z-index: 5; top: 0; bottom: 0; left: 0; box-shadow: var(--shadow); }
     }
@@ -87,7 +91,7 @@
         <div class="big">🎙️</div>
         <h3>Your voice ledger copilot</h3>
         <p>
-          Ask Ledgerly about your business in English, Hindi, or Hinglish.
+          Ask Ledgerly about your business in English, Hindi, Tamil, and more.
         </p>
       </div>
     </div>
@@ -103,6 +107,18 @@
       <button type="button" class="btn btn-voice" id="voice-btn" aria-label="Start voice mode">
         🎙️ Voice
       </button>
+           <select id="lang-select" title="Language" class="history-toggle" aria-label="Language">
+        <option value="en-IN">English</option>
+        <option value="hi-IN">हिन्दी (Hindi)</option>
+        <option value="ta-IN">தமிழ் (Tamil)</option>
+        <option value="te-IN">తెలుగు (Telugu)</option>
+        <option value="kn-IN">ಕನ್ನಡ (Kannada)</option>
+        <option value="ml-IN">മലയാളം (Malayalam)</option>
+        <option value="bn-IN">বাংলা (Bengali)</option>
+        <option value="mr-IN">मराठी (Marathi)</option>
+        <option value="gu-IN">ગુજરાતી (Gujarati)</option>
+        <option value="pa-IN">ਪੰਜਾਬੀ (Punjabi)</option>
+      </select>
       <label class="voice-output-toggle" title="Read Ledgerly replies aloud">
         <input type="checkbox" id="voice-output-toggle" />
         <span>🔊 Read replies</span>
@@ -125,11 +141,27 @@
       const sendBtn = document.getElementById("send-btn");
       const voiceBtn = document.getElementById("voice-btn");
       const voiceOutputToggle = document.getElementById("voice-output-toggle");
+      const langSelect = document.getElementById("lang-select");
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       const voiceMode = Boolean(SpeechRecognition);
       let voiceOutputEnabled = false;
       let recognition = null;
       let isListening = false;
+
+      // Remember the chosen language between visits.
+      try {
+        langSelect.value = localStorage.getItem("ledgerlyLang") || "en-IN";
+      } catch {
+        langSelect.value = "en-IN";
+      }
+      if (!langSelect.value) langSelect.value = "en-IN";
+      langSelect.addEventListener("change", () => {
+        try {
+          localStorage.setItem("ledgerlyLang", langSelect.value);
+        } catch {
+          /* storage unavailable - ignore */
+        }
+      });
 
       voiceOutputToggle.addEventListener("change", () => {
         voiceOutputEnabled = voiceOutputToggle.checked;
@@ -178,9 +210,34 @@
           if (isListening) {
             recognition.stop();
           } else {
+            recognition.lang = langSelect.value;
             recognition.start();
           }
         });
+      }
+
+      // Ask the LLM to summarize the reply and the complete result set for speaking.
+      async function buildSpokenReply(data, question) {
+        const response = await api("/ai/voice-summary", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({
+            question,
+            reply: data && data.reply ? data.reply : "",
+            rows: data && Array.isArray(data.rows) ? data.rows : [],
+            rowCount: data && Number.isFinite(data.rowCount) ? data.rowCount :
+              (data && Array.isArray(data.rows) ? data.rows.length : 0),
+            language: langSelect.value
+          }),
+        });
+        if (response.ok && response.data && response.data.summary) {
+          // Temporary diagnostics: "llm" means the summary was generated; "fallback-*" means it was not.
+          console.log("voice summary source:", response.data.source);
+          return response.data.summary;
+        }
+        console.warn("voice-summary failed, speaking original reply", response.status, response.data);
+        // Graceful fallback if the summary endpoint is temporarily unavailable.
+        return (data && data.reply ? data.reply : "").trim().slice(0, 300);
       }
 
       async function speakReply(text) {
@@ -188,7 +245,7 @@
         const response = await api("/ai/speak", {
           method: "POST",
           headers: authHeaders(),
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, language: langSelect.value }),
         });
         if (!response.ok || !response.data || !response.data.audio) {
           throw new Error(response.data && response.data.error
@@ -296,6 +353,40 @@
           minute: "2-digit",
         })}`;
         panel.appendChild(meta);
+        messagesEl.appendChild(panel);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      // Show only click-to-open reminder links. WhatsApp messages are sent manually by the user.
+      function addWhatsAppButton(data) {
+        if (!data || !data.whatsappUrl || !data.whatsappTo) return;
+
+        const panel = document.createElement("div");
+        panel.className = "msg bot";
+
+        const label = document.createElement("div");
+        label.textContent = "Reminder ready for " + data.whatsappTo + ".";
+
+        const whatsapp = document.createElement("a");
+        whatsapp.href = data.whatsappUrl;
+        whatsapp.target = "_blank";
+        whatsapp.rel = "noopener noreferrer";
+        whatsapp.className = "btn btn-primary btn-sm";
+        whatsapp.textContent = "💬 Open WhatsApp reminder";
+        whatsapp.style.display = "inline-block";
+        whatsapp.style.margin = "8px 8px 8px 0";
+        panel.append(label, whatsapp);
+
+        if (data.smsUrl) {
+          const sms = document.createElement("a");
+          sms.href = data.smsUrl;
+          sms.className = "btn btn-ghost btn-sm";
+          sms.textContent = "✉️ Open SMS";
+          sms.style.display = "inline-block";
+          sms.style.margin = "8px 8px 8px 0";
+          panel.appendChild(sms);
+        }
+
         messagesEl.appendChild(panel);
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
@@ -548,7 +639,11 @@
           const response = await api("/ai/chat", {
             method: "POST",
             headers: authHeaders(),
-            body: JSON.stringify({ message: text, history: previousHistory }),
+            body: JSON.stringify({
+              message: text,
+              history: previousHistory,
+              language: langSelect.value
+            }),
           });
           if (response.status === 401) {
             clearSession();
@@ -575,11 +670,14 @@
           } else {
             addMessage(response.data.reply, "bot");
             addQueryResult(response.data);
+            addWhatsAppButton(response.data);
           }
           if (voiceOutputEnabled && response.data.reply) {
-            speakReply(response.data.reply).catch((error) => {
-              addMessage("Voice playback failed: " + error.message, "bot");
-            });
+            buildSpokenReply(response.data, text)
+              .then((summary) => speakReply(summary))
+              .catch((error) => {
+                addMessage("Voice playback failed: " + error.message, "bot");
+              });
           }
           history.push({ role: "assistant", content: response.data.reply });
         } catch (error) {

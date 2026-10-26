@@ -3,3 +3,5 @@ target/
 .idea/
 *.iml
 node_modules/
+
+backend/src/main/resources/application.properties
